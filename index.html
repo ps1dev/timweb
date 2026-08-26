@@ -1,0 +1,301 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>timweb - PlayStation TIM tool</title>
+<style>
+  :root {
+    --bg: #0d1013;
+    --panel: #14181d;
+    --panel2: #1b2027;
+    --line: #2d353f;
+    --text: #c9d1d9;
+    --dim: #8b949e;
+    --accent: #4ade80;
+    --warn: #e3b341;
+    --error: #f85149;
+    --clut: #c9a227;
+  }
+  * { box-sizing: border-box; }
+  html, body {
+    margin: 0; height: 100%; overflow: hidden;
+    background: var(--bg); color: var(--text);
+    font: 13px/1.4 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  }
+  #app { display: grid; grid-template-rows: auto 1fr auto; height: 100%; }
+
+  #toolbar {
+    display: flex; flex-wrap: wrap; gap: 6px; align-items: center;
+    padding: 6px 8px; background: var(--panel); border-bottom: 1px solid var(--line);
+  }
+  #toolbar .sep { width: 1px; height: 20px; background: var(--line); margin: 0 4px; }
+  #toolbar .grow { flex: 1; }
+
+  button, select, input[type=number], input[type=text] {
+    background: var(--panel2); color: var(--text);
+    border: 1px solid var(--line); border-radius: 3px;
+    padding: 3px 8px; font: inherit;
+  }
+  button { cursor: pointer; }
+  button:hover:not(:disabled) { border-color: var(--dim); }
+  button:disabled { opacity: .4; cursor: default; }
+  button.on { border-color: var(--accent); color: var(--accent); }
+  label { display: flex; align-items: center; gap: 4px; white-space: nowrap; }
+  #right select, #right input[type=text] { min-width: 0; }
+  #right .field .v { min-width: 0; overflow-wrap: anywhere; }
+  input[type=number] { width: 62px; }
+  input[type=range] { width: 110px; vertical-align: middle; }
+
+  #main { display: grid; grid-template-columns: 220px 1fr 330px; min-height: 0; }
+  .panel { background: var(--panel); overflow-y: auto; padding: 8px; }
+  #left { border-right: 1px solid var(--line); }
+  #right { border-left: 1px solid var(--line); }
+  .panel h2 {
+    font-size: 11px; text-transform: uppercase; letter-spacing: .08em;
+    color: var(--dim); margin: 10px 0 6px; font-weight: 600;
+  }
+  .panel h2:first-child { margin-top: 0; }
+
+  #assets { list-style: none; margin: 0; padding: 0; }
+  #assets li {
+    padding: 5px 6px; border: 1px solid transparent; border-radius: 3px;
+    cursor: pointer; display: flex; justify-content: space-between; gap: 6px;
+  }
+  #assets li:hover { background: var(--panel2); }
+  #assets li.sel { background: var(--panel2); border-color: var(--accent); }
+  #assets li .meta { color: var(--dim); font-size: 11px; white-space: nowrap; }
+  #assets li.missing .name { color: var(--warn); }
+
+  #canvas-wrap { position: relative; background: #07090b; overflow: hidden; }
+  #canvas { display: block; cursor: crosshair; }
+  #readout {
+    position: absolute; left: 8px; bottom: 8px; pointer-events: none;
+    background: rgba(13,16,19,.88); border: 1px solid var(--line);
+    border-radius: 3px; padding: 4px 8px; font-size: 11px; color: var(--dim); display: none;
+    white-space: pre;
+  }
+
+  .field { display: flex; justify-content: space-between; gap: 8px; margin: 3px 0; }
+  .field .k { color: var(--dim); }
+  .field .v { text-align: right; }
+  .good { color: var(--accent); }
+  .warn { color: var(--warn); }
+  .bad { color: var(--error); }
+
+  #issues { list-style: none; margin: 0; padding: 0; max-height: 120px; overflow-y: auto; }
+  #issues li { padding: 2px 0; font-size: 11px; }
+  #issues li.error::before { content: "x "; color: var(--error); }
+  #issues li.warn::before { content: "! "; color: var(--warn); }
+
+  #status {
+    padding: 4px 8px; background: var(--panel); border-top: 1px solid var(--line);
+    color: var(--dim); font-size: 11px; display: flex; gap: 14px;
+  }
+  #drop-hint {
+    position: absolute; inset: 0; display: none; align-items: center; justify-content: center;
+    background: rgba(74,222,128,.08); border: 2px dashed var(--accent); font-size: 15px;
+  }
+  #canvas-wrap.dragover #drop-hint { display: flex; }
+  .hidden { display: none !important; }
+  .note { color: var(--dim); font-size: 11px; margin: 6px 0; }
+  .swatches { display: flex; flex-wrap: wrap; gap: 1px; margin-top: 4px; }
+  .swatches i { width: 10px; height: 10px; display: block; outline: 1px solid #0006; }
+</style>
+</head>
+<body>
+<div id="app">
+
+  <div id="toolbar">
+    <button id="btn-import">Import images</button>
+    <button id="btn-import-tim">Import .tim/.pxl</button>
+    <span class="sep"></span>
+    <button id="btn-open">Open project</button>
+    <button id="btn-save">Save project</button>
+    <button id="btn-export">Export .zip</button>
+    <label title="TIM files"><input type="checkbox" id="x-tim" checked> .tim</label>
+    <label title="Headerless image + palette data, as convertImage.py emits"><input type="checkbox" id="x-raw"> raw .dat</label>
+    <label title="Split TIMs: pixel section and CLUT section in separate files"><input type="checkbox" id="x-pxl"> .pxl/.clt</label>
+    <label title="Render the placement template to a text file"><input type="checkbox" id="x-tpl"> template</label>
+    <span class="sep"></span>
+    <label title="2MB VRAM: 1024x1024 instead of 1024x512"><input type="checkbox" id="p-2mb"> 2MB VRAM</label>
+    <span class="sep"></span>
+    <label>View
+      <select id="view-mode">
+        <option value="normal">Normal</option>
+        <option value="overlap">Overlap</option>
+        <option value="free">Free space</option>
+      </select>
+    </label>
+    <button id="btn-zoom-out">-</button>
+    <span id="zoom-label" style="min-width:44px;text-align:center">100%</span>
+    <button id="btn-zoom-in">+</button>
+    <button id="btn-fit">Fit</button>
+    <span class="sep"></span>
+    <label><input type="checkbox" id="snap-grid" checked> grid</label>
+    <input type="number" id="snap-size" value="4" min="1" max="256" title="snap grid, halfwords">
+    <label><input type="checkbox" id="snap-edges" checked> edges</label>
+    <span class="grow"></span>
+  </div>
+
+  <div id="main">
+    <div class="panel" id="left">
+      <h2>Assets</h2>
+      <ul id="assets"></ul>
+      <p class="note" id="assets-empty">Drop PNG/JPEG/GIF/WebP/BMP, .tim, or paired .pxl + .clt files onto the canvas, or use the toolbar.</p>
+      <h2>Keepouts <button id="k-add" style="float:right;padding:1px 6px">+</button></h2>
+      <select id="k-preset" style="width:100%;margin-bottom:4px">
+        <option value="">insert framebuffer...</option>
+        <option value="320x240">320x240</option>
+        <option value="320x256">320x256</option>
+        <option value="368x240">368x240</option>
+        <option value="512x240">512x240</option>
+        <option value="640x480">640x480</option>
+      </select>
+      <ul id="keepouts"></ul>
+      <p class="note" id="keepouts-empty">None. A keepout reserves VRAM that auto-placement must avoid. Framebuffers are keepouts - use the menu above to insert one at a standard size.</p>
+
+      <h2>VRAM</h2>
+      <div class="field"><span class="k">used</span><span class="v" id="vram-used">0%</span></div>
+      <div class="field"><span class="k">free</span><span class="v" id="vram-free">100%</span></div>
+      <div class="field"><span class="k">overlapping</span><span class="v" id="vram-overlap">0</span></div>
+    </div>
+
+    <div id="canvas-wrap">
+      <canvas id="canvas"></canvas>
+      <div id="readout"></div>
+      <div id="drop-hint">drop images or .tim files</div>
+    </div>
+
+    <div class="panel" id="right">
+      <div id="inspector-empty" class="note">Select an asset to inspect it.</div>
+
+      <div id="k-inspector" class="hidden">
+        <h2>Keepout</h2>
+        <label style="margin-bottom:6px">name <input type="text" id="k-name" style="flex:1;min-width:0"></label>
+        <div style="display:flex;gap:6px;margin:3px 0">
+          <label>x <input type="number" id="k-x" min="0" max="1023"></label>
+          <label>y <input type="number" id="k-y" min="0" max="1023"></label>
+        </div>
+        <div style="display:flex;gap:6px;margin:3px 0">
+          <label>w <input type="number" id="k-w" min="1" max="1024"></label>
+          <label>h <input type="number" id="k-h" min="1" max="1024"></label>
+        </div>
+        <p class="note">Halfwords, like everything else. Drag it on the canvas or type coordinates.</p>
+        <button id="k-del">Delete keepout</button>
+      </div>
+
+      <div id="inspector" class="hidden">
+        <h2>Asset</h2>
+        <label style="margin-bottom:6px">name <input type="text" id="a-name" style="flex:1"></label>
+        <div class="field"><span class="k">source</span><span class="v" id="a-size">-</span></div>
+        <div class="field"><span class="k">distinct RGB555</span><span class="v" id="a-distinct">-</span></div>
+
+        <label><input type="checkbox" id="a-locked"> locked in place</label>
+
+        <h2>Depth</h2>
+        <label><input type="checkbox" id="a-auto"> auto (cost model)</label>
+        <label style="margin-top:4px">depth
+          <select id="a-depth" style="flex:1">
+            <option value="0">4bpp (16 colours)</option>
+            <option value="1">8bpp (256 colours)</option>
+            <option value="2">16bpp (direct)</option>
+          </select>
+        </label>
+        <div class="field"><span class="k">texture VRAM</span><span class="v" id="a-texwords">-</span></div>
+        <div class="field"><span class="k">CLUT VRAM</span><span class="v" id="a-clutwords">-</span></div>
+
+        <h2>Conversion</h2>
+        <label><input type="checkbox" id="a-dither"> dither (Floyd-Steinberg)</label>
+        <label style="margin-top:6px">opaque black
+          <select id="a-blackmode" style="flex:1">
+            <option value="gray">dark grey (always opaque)</option>
+            <option value="stp">semi-transparent black 0x8000</option>
+          </select>
+        </label>
+        <label style="margin-top:4px" id="a-blackrepl-row">replacement
+          <input type="text" id="a-blackrepl" value="0x0421" style="width:74px">
+        </label>
+        <p class="note" id="a-blackmode-note"></p>
+        <label style="margin-top:4px"><input type="checkbox" id="a-forcestp"> force STP on every texel</label>
+        <p class="note">Needed for additive or subtractive blending: the primitive's ABR picks the equation, but each texel still needs its own STP bit to take part. Implies semi-transparent black.</p>
+        <div style="display:flex;gap:6px;margin:3px 0">
+          <label>alpha hole &lt; <input type="number" id="a-atrans" min="1" max="255" value="32"></label>
+          <label>solid &ge; <input type="number" id="a-asolid" min="1" max="256" value="224"></label>
+        </div>
+
+        <h2>Quality</h2>
+        <div class="field"><span class="k">method</span><span class="v" id="q-method">-</span></div>
+        <div class="field"><span class="k">max channel error</span><span class="v" id="q-max">-</span></div>
+        <div class="field"><span class="k">past 5-bit floor</span><span class="v" id="q-past">-</span></div>
+        <div class="field"><span class="k">mean error</span><span class="v" id="q-mean">-</span></div>
+        <div class="field"><span class="k">black substituted</span><span class="v" id="q-excused">-</span></div>
+        <div class="field"><span class="k">CLUT collisions</span><span class="v" id="q-collisions">-</span></div>
+        <div class="field"><span class="k">texels solid/semi/hole</span><span class="v" id="q-bands">-</span></div>
+        <div class="field"><span class="k">entries with STP</span><span class="v" id="q-stp">-</span></div>
+        <p class="note" id="q-note"></p>
+        <div class="swatches" id="q-swatches"></div>
+
+        <h2>Placement (halfwords)</h2>
+        <div style="display:flex;gap:6px;margin:3px 0">
+          <label>x <input type="number" id="a-x" min="0" max="1023"></label>
+          <label>y <input type="number" id="a-y" min="0" max="511"></label>
+        </div>
+        <div style="display:flex;gap:6px;margin:3px 0" id="clut-pos">
+          <label>clut x <input type="number" id="a-cx" min="0" max="1023" step="16"></label>
+          <label>clut y <input type="number" id="a-cy" min="0" max="511"></label>
+        </div>
+        <button id="a-autoplace" style="margin-top:6px">Find free space</button>
+        <button id="a-delete" style="margin-top:6px">Delete asset</button>
+      </div>
+
+      <h2>Project</h2>
+      <label>CLUT penalty <input type="range" id="p-penalty" min="0" max="64" step="1" value="1">
+        <span id="p-penalty-val" style="width:26px;text-align:right">1</span></label>
+      <p class="note">1 minimises total VRAM. Higher pushes marginal assets to 16bpp and reclaims CLUT strips.</p>
+      <label><input type="checkbox" id="p-floor-on"> quality floor
+        <input type="number" id="p-floor" min="0" max="100" value="90" disabled></label>
+      <p class="note">A floor makes auto-depth actually run the quantizer at each depth. Without one, it decides on VRAM cost alone.</p>
+      <button id="p-reauto" style="margin-top:4px">Re-run auto depth on all</button>
+
+      <h2>Raw export</h2>
+      <div style="display:flex;gap:6px;margin:3px 0">
+        <label style="flex:1">image <input type="text" id="p-imgsuffix" style="flex:1;min-width:0"></label>
+      </div>
+      <div style="display:flex;gap:6px;margin:3px 0">
+        <label style="flex:1">palette <input type="text" id="p-palsuffix" style="flex:1;min-width:0"></label>
+      </div>
+      <div style="display:flex;gap:6px;margin:3px 0">
+        <label style="flex:1">pxl <input type="text" id="p-pxlsuffix" style="flex:1;min-width:0"></label>
+        <label style="flex:1">clt <input type="text" id="p-cltsuffix" style="flex:1;min-width:0"></label>
+      </div>
+      <p class="note" id="p-suffix-preview"></p>
+
+      <h2>Placement template</h2>
+      <label style="margin:3px 0">file <input type="text" id="p-tplfile" style="flex:1;min-width:0"></label>
+      <textarea id="p-template" spellcheck="false" style="width:100%;height:150px;background:var(--panel2);color:var(--text);border:1px solid var(--line);border-radius:3px;font:11px/1.35 ui-monospace,monospace;padding:5px;resize:vertical"></textarea>
+      <p class="note">{{name}} {{x}} {{y}} {{w}} {{h}} {{width}} {{height}} {{bpp}} {{clutX}} {{clutY}} {{page}} {{u}} {{v}} {{imageFile}} {{paletteFile}} {{timFile}}, repeated inside {{#assets}}...{{/assets}}. {{#clut}}...{{/clut}} for assets that have one, {{^clut}} for those that don't. Append :hex or :hex4 to any number. Unknown names are left alone so typos show up.</p>
+      <button id="p-tplpreview">Preview</button>
+      <pre id="p-tplout" class="note hidden" style="white-space:pre-wrap;max-height:180px;overflow:auto;background:var(--panel2);border:1px solid var(--line);border-radius:3px;padding:5px"></pre>
+
+      <h2>Issues</h2>
+      <ul id="issues"></ul>
+      <p class="note" id="issues-none">No layout problems.</p>
+    </div>
+  </div>
+
+  <div id="status">
+    <span id="s-assets">0 assets</span>
+    <span id="s-issues">0 issues</span>
+    <span id="s-hover"></span>
+    <span style="margin-left:auto" id="s-msg"></span>
+  </div>
+</div>
+
+<input type="file" id="file-images" multiple accept="image/*" class="hidden">
+<input type="file" id="file-tims" multiple accept=".tim,.TIM,.pxl,.PXL,.clt,.CLT" class="hidden">
+<input type="file" id="file-project" accept=".json" class="hidden">
+
+<script type="module" src="/src/main.ts"></script>
+</body>
+</html>
