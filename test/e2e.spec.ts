@@ -115,7 +115,17 @@ describe('the built single file', () => {
     expect(html).not.toMatch(/<link[^>]+href=["'](?!data:)[^"']*\.css/);
   });
 
-  it('loads from file:// with no console or page errors', () => {
+  it('loads from file:// with no console or page errors', async () => {
+    // Positive control first. An empty array is the one result that carries
+    // no information about whether the instrument works, and there are four
+    // assertions in this file whose entire pass condition is an empty array.
+    // Prove the listener is live, then take the canary back out.
+    await page.evaluate(() => console.error('e2e-canary'));
+    await page.waitForFunction(() => true);
+    const canary = consoleErrors.indexOf('e2e-canary');
+    expect(canary, 'console listener is not wired - every empty-array assertion below is blind').toBeGreaterThanOrEqual(0);
+    consoleErrors.splice(canary, 1);
+
     expect(pageErrors).toEqual([]);
     expect(consoleErrors).toEqual([]);
   });
@@ -150,7 +160,22 @@ describe('import and convert', () => {
     await importPng('blocks.png', png);
 
     expect(await page.textContent('#s-assets')).toBe('1 asset');
+
+    // Import auto-selects, so clicking the list entry is a no-op unless we
+    // clear the selection first - and every readout below was already
+    // populated. Deselect through the canvas so the click is the thing that
+    // brings the inspector back, which is the only coverage the list click
+    // handler gets anywhere in this suite.
+    // Viewport (4,4) is chrome, not canvas - no pointerdown reaches the
+    // handler and the selection survives. Go through the canvas box.
+    const cbox = (await page.locator('#canvas').boundingBox())!;
+    await page.mouse.click(cbox.x + 8, cbox.y + cbox.height - 8);
+    await page.waitForTimeout(120);
+    expect(await page.locator('#inspector').isVisible(), 'selection did not clear').toBe(false);
     await page.click('#assets li');
+    await page.waitForTimeout(120);
+    expect(await page.locator('#inspector').isVisible()).toBe(true);
+
     expect(await page.textContent('#a-size')).toBe('64x64 texels');
     expect(Number(await page.textContent('#a-distinct'))).toBe(8);
     // Eight colours fit any palette, so the quantizer must not have run.
@@ -164,11 +189,6 @@ describe('import and convert', () => {
   });
 
   it('draws the asset onto the VRAM canvas', async () => {
-    const before = await page.evaluate(() => {
-      const c = document.getElementById('canvas') as HTMLCanvasElement;
-      return c.getContext('2d')!.getImageData(0, 0, c.width, c.height).data.length;
-    });
-    expect(before).toBeGreaterThan(0);
     // Count pixels matching one of the source colours: the preview is drawn
     // squashed into halfword space, but the colours survive.
     const hits = await page.evaluate(() => {
@@ -197,9 +217,19 @@ describe('import and convert', () => {
     await page.click('#assets li:last-child');
 
     // Force 4bpp: 16 entries for a gradient is a massacre and the readout
-    // should say so rather than quietly reporting a small mean.
+    // should say so rather than quietly reporting a small mean. Pin the
+    // pre-state first: if auto-depth already chose 4bpp then selectOption
+    // changes nothing and every assertion below is satisfied before the act.
+    // Measured, not assumed: auto-depth puts this gradient at 16bpp, so the
+    // pre-state readouts are 'direct colour' / '<= 7' and every assertion
+    // below genuinely discriminates. Pinned so an auto-depth regression that
+    // pre-satisfies them fails here instead of silently.
+    expect(await page.inputValue('#a-depth')).toBe(String(TimType.Bpp16));
     await page.selectOption('#a-depth', String(TimType.Bpp4));
-    await page.waitForFunction(() => document.getElementById('q-method')?.textContent !== 'exact (no loss)');
+    // Wait for the value we actually want. The old predicate was
+    // `!== 'exact (no loss)'`, which was already true at 16bpp ('direct
+    // colour') and so returned on its first poll, synchronising nothing.
+    await page.waitForFunction(() => document.getElementById('q-method')?.textContent === 'median-cut');
     expect(await page.textContent('#q-method')).toBe('median-cut');
     const past = parseFloat((await page.textContent('#q-past'))!);
     expect(past).toBeGreaterThan(0);
@@ -231,8 +261,13 @@ describe('the CLUT penalty slider', () => {
     // 256 texels is well under the 512-texel crossover even at penalty 1...
     const cheap = await depthAt(1);
     const dear = await depthAt(64);
+    // BOTH ends, because the claim is that the slider MOVED it. Asserting
+    // only the 16bpp end passes just as well on an asset pinned to 16bpp,
+    // and Bpp16 is the largest enum value so `dear >= cheap` cannot fail
+    // once that first assertion holds - it looked like the direction check
+    // and was not one.
+    expect(cheap).toBe(String(TimType.Bpp4));
     expect(dear).toBe(String(TimType.Bpp16));
-    expect(Number(dear)).toBeGreaterThanOrEqual(Number(cheap));
   });
 });
 
@@ -272,11 +307,11 @@ describe('export', () => {
     const b64 = await page.evaluate(async () => {
       // Reach the export path the button uses, but capture the bytes instead
       // of triggering a download, which headless cannot easily read back.
-      const mod = (window as unknown as { __timweb?: unknown }).__timweb;
-      if (mod) return null;
-      return null;
+      return (window as unknown as { __timweb?: unknown }).__timweb === undefined;
     });
-    expect(b64).toBeNull(); // no test hook in the shipped build, by design
+    // The shipped build exposes no test hook, by design. Asserted, rather than
+    // assumed: the previous version of this returned null down both branches.
+    expect(b64).toBe(true);
 
     // So drive the real button and intercept the download.
     const [download] = await Promise.all([
@@ -450,7 +485,12 @@ describe('pointer and render agree at dpr 2', () => {
     await hp.mouse.click(box.x + sx, box.y + sy);
     await hp.waitForTimeout(150);
     expect(await hp.locator('#inspector').isVisible()).toBe(true);
-    expect(await hp.inputValue('#a-x')).toBe('700');
+    // The visibility flip above is the discriminator, because the corner
+    // click cleared it. `#a-x` deliberately is NOT checked here: renderInspector
+    // returns before touching any input when nothing is selected, so the field
+    // still reads 700 through the hidden panel - and with one asset in the
+    // project it could not tell "selected the right one" from "selected the
+    // only one" even if it did clear.
 
     // And the drawn pixels are where the pointer says they are.
     const hit = await hp.evaluate(
