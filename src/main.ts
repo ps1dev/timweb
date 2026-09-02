@@ -292,8 +292,15 @@ function draw(): void {
   // field while the model places things below it.
   state.view.height = vramHeight(state.project);
   const dpr = window.devicePixelRatio || 1;
+
+  // Clear in DEVICE pixels, then hand render() a CSS-pixel base transform.
+  // Everything downstream - drawing, hit-testing, snapping - works in CSS
+  // pixels, so this is the single place the two coordinate systems meet.
   ctx.setTransform(1, 0, 0, 1, 0, 0);
-  ctx.scale(dpr, dpr);
+  ctx.fillStyle = '#0d1013';
+  ctx.fillRect(0, 0, canvas.width, canvas.height);
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+
   render(ctx, {
     placements: projectPlacements(state.project),
     previews: previews as Map<string, CanvasImageSource>,

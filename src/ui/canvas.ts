@@ -68,13 +68,23 @@ const COLORS = {
   text: '#c9d1d9',
 };
 
+/**
+ * Draw the VRAM canvas.
+ *
+ * The caller owns the base transform and this function MUST NOT reset it. It
+ * used to open with `setTransform(1,0,0,1,0,0)`, which silently discarded the
+ * device-pixel-ratio scale the caller had just applied - so everything drew in
+ * DEVICE pixels while hit-testing kept working in CSS pixels. At dpr 1 the two
+ * agree and nothing looks wrong; at dpr 2 every drawn object sits at half the
+ * position the pointer maths expects, an error of
+ * `(v*zoom - panX) * (1 - 1/dpr)` that grows with both zoom and pan and so
+ * reads as an incomprehensible drift rather than an offset.
+ *
+ * Clearing the background is the caller's job for the same reason: it is the
+ * only step that wants device pixels.
+ */
 export function render(ctx: CanvasRenderingContext2D, input: RenderInput): void {
   const { view } = input;
-  const canvas = ctx.canvas;
-
-  ctx.setTransform(1, 0, 0, 1, 0, 0);
-  ctx.fillStyle = COLORS.background;
-  ctx.fillRect(0, 0, canvas.width, canvas.height);
 
   ctx.save();
   ctx.translate(-view.panX, -view.panY);

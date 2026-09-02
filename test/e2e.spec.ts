@@ -322,3 +322,152 @@ describe('no errors accumulated during the whole session', () => {
     expect(consoleErrors).toEqual([]);
   });
 });
+
+// ---------------------------------------------------------------------------
+// Pointer/render agreement at a non-unit device pixel ratio
+// ---------------------------------------------------------------------------
+
+/**
+ * Everything above runs at Playwright's default deviceScaleFactor of 1, and at
+ * dpr 1 a whole class of transform bug is invisible: if drawing and
+ * hit-testing disagree by a factor of dpr, the two agree exactly when dpr is 1.
+ *
+ * That is not hypothetical. `render()` opened with a setTransform that threw
+ * away the caller's dpr scale, so on any HiDPI display every object drew at
+ * half the position the pointer maths expected - reported by the repo owner
+ * after the tool had shipped a green suite for a week. The suite could not
+ * have caught it, and one screenshot script pinned deviceScaleFactor to 1
+ * explicitly.
+ *
+ * So: a second browser at dpr 2, asserting that clicking where the app's own
+ * screen mapping says a thing is actually selects that thing. That inverse
+ * consistency has to hold at every dpr.
+ */
+describe('pointer and render agree at dpr 2', () => {
+  let hi: Browser;
+  let hp: Page;
+  const hiErrors: string[] = [];
+
+  beforeAll(async () => {
+    hi = await chromium.launch({ executablePath: CHROME, args: ['--no-sandbox'] });
+    hp = await hi.newPage({ viewport: { width: 1400, height: 900 }, deviceScaleFactor: 2 });
+    hp.on('pageerror', (e) => hiErrors.push(e.message));
+    await hp.goto(`file://${DIST}`);
+    await hp.waitForSelector('#canvas');
+  }, 120_000);
+
+  afterAll(async () => {
+    await hi?.close();
+  });
+
+  it('confirms the browser really is at dpr 2', async () => {
+    // A control: if this drops to 1 the rest of the block proves nothing.
+    expect(await hp.evaluate(() => window.devicePixelRatio)).toBe(2);
+  });
+
+  it('selects the asset under the pointer, not one scaled away from it', async () => {
+    const png = await hp.evaluate(() => {
+      const c = document.createElement('canvas');
+      c.width = 64;
+      c.height = 64;
+      const cx = c.getContext('2d')!;
+      const img = cx.createImageData(64, 64);
+      for (let i = 0; i < 64 * 64; i++) {
+        img.data[i * 4] = (i % 6) * 40;
+        img.data[i * 4 + 1] = 180;
+        img.data[i * 4 + 2] = 70;
+        img.data[i * 4 + 3] = 255;
+      }
+      cx.putImageData(img, 0, 0);
+      return c.toDataURL('image/png');
+    });
+    await hp.setInputFiles('#file-images', {
+      name: 'target.png',
+      mimeType: 'image/png',
+      buffer: Buffer.from(png.split(',')[1], 'base64'),
+    });
+    await hp.waitForFunction(() => document.querySelectorAll('#assets li').length === 1);
+
+    // 16bpp so it is 64 halfwords wide rather than 16 - a bigger target, and
+    // the depth does not matter to the transform under test.
+    await hp.click('#assets li');
+    await hp.uncheck('#a-auto');
+    await hp.selectOption('#a-depth', String(TimType.Bpp16));
+    await hp.fill('#a-x', '700');
+    await hp.dispatchEvent('#a-x', 'change');
+    await hp.fill('#a-y', '300');
+    await hp.dispatchEvent('#a-y', 'change');
+    await hp.click('#btn-fit');
+    await hp.waitForTimeout(200);
+
+    const box = (await hp.locator('#canvas').boundingBox())!;
+
+    // Derive the screen<->VRAM mapping from the app's OWN pointer path, by
+    // probing two positions and reading the coordinate it reports. The test
+    // must not reimplement the maths it is checking.
+    const probe = async (sx: number, sy: number) => {
+      await hp.mouse.move(box.x + sx, box.y + sy);
+      await hp.waitForTimeout(40);
+      const raw = (await hp.textContent('#s-hover')) ?? '';
+      // An EMPTY readout means the pointer was outside the VRAM field, which
+      // is what the first version of this probe hit: at fit, VRAM is centred
+      // vertically, so a point 120px down the canvas is above it. An empty
+      // string parses to [0] and NaN, and only the NaN showed up - 200 lines
+      // later, as an unexplained failure.
+      expect(raw, `no readout at ${sx},${sy} - probe is outside the VRAM field`).toMatch(/^\d+,\d+$/);
+      const [x, y] = raw.split(',').map(Number);
+      return { x, y };
+    };
+    // Probe from the centre outward, where VRAM certainly is at fit.
+    const cx = box.width / 2;
+    const cy = box.height / 2;
+    const p0 = await probe(cx - 100, cy - 100);
+    const p1 = await probe(cx + 100, cy + 100);
+    const scaleX = (p1.x - p0.x) / 200;
+    const scaleY = (p1.y - p0.y) / 200;
+    expect(scaleX, 'degenerate mapping').toBeGreaterThan(0);
+    expect(scaleY).toBeGreaterThan(0);
+
+    // Aim at the middle of the texture: VRAM 700..764 x 300..364.
+    const sx = cx - 100 + (732 - p0.x) / scaleX;
+    const sy = cy - 100 + (332 - p0.y) / scaleY;
+
+    // Positive control. If the target is off-canvas the click lands nowhere,
+    // getImageData reads out of bounds and returns zeros, and every assertion
+    // below becomes vacuous. That is exactly how the first version of this
+    // test reported a pass it had not earned.
+    expect(sx, 'target off canvas').toBeGreaterThan(0);
+    expect(sx).toBeLessThan(box.width);
+    expect(sy).toBeGreaterThan(0);
+    expect(sy).toBeLessThan(box.height);
+
+    // Clear the selection first, or "the inspector is visible" is already true
+    // and the assertion has no power.
+    await hp.mouse.click(box.x + 8, box.y + box.height - 8);
+    await hp.waitForTimeout(120);
+    expect(await hp.locator('#inspector').isVisible(), 'selection did not clear').toBe(false);
+
+    await hp.mouse.click(box.x + sx, box.y + sy);
+    await hp.waitForTimeout(150);
+    expect(await hp.locator('#inspector').isVisible()).toBe(true);
+    expect(await hp.inputValue('#a-x')).toBe('700');
+
+    // And the drawn pixels are where the pointer says they are.
+    const hit = await hp.evaluate(
+      ([px, py]) => {
+        const c = document.getElementById('canvas') as HTMLCanvasElement;
+        const dpr = window.devicePixelRatio || 1;
+        const d = c
+          .getContext('2d')!
+          .getImageData(Math.round((px as number) * dpr), Math.round((py as number) * dpr), 1, 1).data;
+        return [d[0], d[1], d[2]];
+      },
+      [sx, sy] as const,
+    );
+    expect(hit[1], `sampled rgb(${hit}) at ${Math.round(sx)},${Math.round(sy)}`).toBeGreaterThan(120);
+  });
+
+  it('threw nothing along the way', () => {
+    expect(hiErrors).toEqual([]);
+  });
+});
