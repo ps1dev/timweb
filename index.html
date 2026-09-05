@@ -135,6 +135,9 @@
     <label><input type="checkbox" id="snap-grid" checked> grid</label>
     <input type="number" id="snap-size" value="4" min="1" max="256" title="snap grid, halfwords">
     <label><input type="checkbox" id="snap-edges" checked> edges</label>
+    <span class="sep"></span>
+    <button id="btn-pack" title="Place every asset that is not locked or excluded. Keepouts and pinned assets are treated as occupied.">Auto-place all</button>
+    <button id="btn-pack-sel" title="Re-place only the selected asset, leaving everything else where it is.">Auto-place selected</button>
     <span class="grow"></span>
   </div>
 
@@ -192,6 +195,7 @@
         <div class="field"><span class="k">distinct RGB555</span><span class="v" id="a-distinct">-</span></div>
 
         <label><input type="checkbox" id="a-locked"> locked in place</label>
+        <label title="Automatic placement leaves this asset alone. Independent of the lock: an excluded asset can still be dragged."><input type="checkbox" id="a-nopack"> exclude from auto-placement</label>
 
         <h2>Depth</h2>
         <label><input type="checkbox" id="a-auto"> auto (cost model)</label>

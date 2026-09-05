@@ -351,6 +351,99 @@ describe('export', () => {
   });
 });
 
+describe('automatic placement through the UI', () => {
+  // Two assets driven on top of each other, then packed apart. The overlap is
+  // established first so the pass has something to undo - a packer that did
+  // nothing would leave the issue standing.
+  it('imports a second asset and stacks it on the first', async () => {
+    const png = await makePng(64, 48, 'for (let i=0;i<w*h;i++){data[i*4]=(i*7)&255;data[i*4+1]=(i*13)&255;data[i*4+2]=90;data[i*4+3]=255;}');
+    await importPng('packme.png', png);
+
+    // Put both at the same spot by hand.
+    await page.click('#assets li:first-child');
+    await page.fill('#a-x', '600');
+    await page.dispatchEvent('#a-x', 'change');
+    await page.fill('#a-y', '300');
+    await page.dispatchEvent('#a-y', 'change');
+
+    await page.click('#assets li:nth-child(2)');
+    await page.fill('#a-x', '600');
+    await page.dispatchEvent('#a-x', 'change');
+    await page.fill('#a-y', '300');
+    await page.dispatchEvent('#a-y', 'change');
+
+    await page.waitForFunction(
+      () => (document.getElementById('vram-overlap')?.textContent ?? '0 hw') !== '0 hw',
+      undefined,
+      { timeout: 15_000 },
+    );
+  });
+
+  it('separates them and clears the overlap', async () => {
+    await page.click('#btn-pack');
+    await page.waitForFunction(
+      () => document.getElementById('vram-overlap')?.textContent === '0 hw',
+      undefined,
+      { timeout: 15_000 },
+    );
+    expect(await page.textContent('#s-issues')).toBe('0 issues');
+  });
+
+  it('holds an excluded asset in place while moving the rest', async () => {
+    // Park the second asset somewhere known, exclude it, drive the first one
+    // on top of it, then pack. The excluded one must not have budged.
+    await page.click('#assets li:nth-child(2)');
+    await page.fill('#a-x', '700');
+    await page.dispatchEvent('#a-x', 'change');
+    await page.fill('#a-y', '320');
+    await page.dispatchEvent('#a-y', 'change');
+    await page.check('#a-nopack');
+
+    const before = await page.evaluate(() => ({
+      x: (document.getElementById('a-x') as HTMLInputElement).value,
+      y: (document.getElementById('a-y') as HTMLInputElement).value,
+    }));
+
+    await page.click('#assets li:first-child');
+    await page.fill('#a-x', '700');
+    await page.dispatchEvent('#a-x', 'change');
+    await page.fill('#a-y', '320');
+    await page.dispatchEvent('#a-y', 'change');
+
+    await page.click('#btn-pack');
+    await page.waitForFunction(
+      () => document.getElementById('vram-overlap')?.textContent === '0 hw',
+      undefined,
+      { timeout: 15_000 },
+    );
+
+    await page.click('#assets li:nth-child(2)');
+    const after = await page.evaluate(() => ({
+      x: (document.getElementById('a-x') as HTMLInputElement).value,
+      y: (document.getElementById('a-y') as HTMLInputElement).value,
+      excluded: (document.getElementById('a-nopack') as HTMLInputElement).checked,
+      locked: (document.getElementById('a-locked') as HTMLInputElement).checked,
+    }));
+    expect(after.x).toBe(before.x);
+    expect(after.y).toBe(before.y);
+    // The exclusion did its work WITHOUT the lock, which is the whole point of
+    // the two being separate toggles.
+    expect(after.excluded).toBe(true);
+    expect(after.locked).toBe(false);
+
+    // Discriminator: the other asset really was moved off the shared spot.
+    await page.click('#assets li:first-child');
+    const moved = await page.evaluate(() => ({
+      x: (document.getElementById('a-x') as HTMLInputElement).value,
+      y: (document.getElementById('a-y') as HTMLInputElement).value,
+    }));
+    expect([moved.x, moved.y]).not.toEqual(['700', '320']);
+
+    await page.click('#assets li:nth-child(2)');
+    await page.uncheck('#a-nopack');
+  });
+});
+
 describe('no errors accumulated during the whole session', () => {
   it('logged nothing to the console and threw nothing', () => {
     expect(pageErrors).toEqual([]);

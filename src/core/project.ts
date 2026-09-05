@@ -86,11 +86,23 @@ export interface Asset {
    * it. A layout tool that relocates something the user positioned by hand is
    * worse than one that does not try.
    *
-   * DELIBERATELY NOT the same thing as "exclude from packing". That is a
-   * separate flag for a packer that does not exist yet, and conflating them
-   * would make this checkbox a promise about behaviour nothing implements.
+   * DELIBERATELY NOT the same thing as `excludeFromPacking`. Locking is about
+   * the user's own edits; exclusion is about the automatic placer. They are
+   * independent toggles because the four combinations are all meaningful, and
+   * spicyjpeg was explicit about keeping them apart.
    */
   locked?: boolean;
+  /**
+   * The automatic placer leaves this asset where it is.
+   *
+   * Independent of `locked`: an excluded asset can still be dragged by hand,
+   * and a locked asset is never moved by anything regardless of this flag -
+   * locking would mean nothing if the packer could override it. So the packer
+   * treats `locked || excludeFromPacking` as fixed, and both are offered
+   * separately because "pin this while I rearrange the rest" and "keep this
+   * where I put it" are different intentions.
+   */
+  excludeFromPacking?: boolean;
   /** VRAM position in halfwords. */
   x: number;
   y: number;
@@ -595,6 +607,7 @@ interface SerializedAsset {
   clutX: number;
   clutY: number;
   locked?: boolean;
+  excludeFromPacking?: boolean;
 }
 
 export interface SerializedProject {
@@ -647,6 +660,7 @@ export function serializeProject(project: Project): string {
       clutX: a.clutX,
       clutY: a.clutY,
       locked: a.locked,
+      excludeFromPacking: a.excludeFromPacking,
     })),
   };
   return JSON.stringify(out, null, 2);

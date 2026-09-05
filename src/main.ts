@@ -18,6 +18,7 @@ import {
   findFreeSpot,
 } from './core/vram.js';
 import { CLUT_WORDS, type SelectableDepth } from './core/depth.js';
+import { packProject } from './core/autopack.js';
 import {
   emptyProject,
   vramHeight,
@@ -320,22 +321,45 @@ function update(): void {
   renderStatus();
 }
 
+/**
+ * Refresh a list IN PLACE, reusing the existing `<li>` nodes.
+ *
+ * Deliberately not `innerHTML = ''` and rebuild. Type into a coordinate field
+ * and then click another row: the click's own mousedown blurs the field, the
+ * blur fires `change`, the handler calls `update()`, and the row the click
+ * started on is removed from the document before the click completes - so the
+ * click is silently swallowed and the selection does not move. Found by
+ * driving the built page, not by any unit test, because the bug lives
+ * entirely in event ordering the DOM supplies.
+ *
+ * Selection-on-mousedown would also "fix" it and is worse: it moves the
+ * selection before the blur, so the edit the user just typed gets applied to
+ * whichever row they clicked instead. Keeping the node alive keeps both
+ * events, in the right order.
+ */
+function syncList<T>(
+  ul: HTMLElement,
+  items: T[],
+  render: (item: T, li: HTMLLIElement) => void,
+): void {
+  while (ul.children.length > items.length) ul.lastElementChild!.remove();
+  while (ul.children.length < items.length) ul.appendChild(document.createElement('li'));
+  items.forEach((item, i) => render(item, ul.children[i] as HTMLLIElement));
+}
+
 function renderAssetList(): void {
-  const ul = $('assets');
-  ul.innerHTML = '';
-  for (const a of state.project.assets) {
-    const li = document.createElement('li');
-    if (state.selected?.endsWith(`:${a.id}`)) li.className = 'sel';
+  syncList($('assets'), state.project.assets, (a, li) => {
+    li.className = state.selected?.endsWith(`:${a.id}`) ? 'sel' : '';
     const bpp = a.settings.depth === TimType.Bpp4 ? '4' : a.settings.depth === TimType.Bpp8 ? '8' : '16';
-    li.innerHTML =
+    const html =
       `<span class="name">${escapeHtml(a.name)}</span>` +
       `<span class="meta">${a.width}x${a.height} ${bpp}bpp${a.settings.depthAuto ? '*' : ''}</span>`;
+    if (li.innerHTML !== html) li.innerHTML = html;
     li.onclick = () => {
       state.selected = `tex:${a.id}`;
       update();
     };
-    ul.appendChild(li);
-  }
+  });
   $('assets-empty').classList.toggle('hidden', state.project.assets.length > 0);
 }
 
@@ -350,6 +374,7 @@ function renderInspector(): void {
   $('a-distinct').textContent = distinctLabel(a);
 
   $<HTMLInputElement>('a-locked').checked = !!a.locked;
+  $<HTMLInputElement>('a-nopack').checked = !!a.excludeFromPacking;
   $<HTMLInputElement>('a-auto').checked = a.settings.depthAuto;
   $<HTMLSelectElement>('a-depth').value = String(a.settings.depth);
   // Deliberately NOT disabled while auto is on: picking a depth by hand is
@@ -756,20 +781,17 @@ function selectedKeepout(): Keepout | undefined {
 }
 
 function renderKeepouts(): void {
-  const ul = $('keepouts');
-  ul.innerHTML = '';
-  for (const k of state.project.keepouts) {
-    const li = document.createElement('li');
-    if (state.selected === `keepout:${k.id}`) li.className = 'sel';
-    li.innerHTML =
+  syncList($('keepouts'), state.project.keepouts, (k, li) => {
+    li.className = state.selected === `keepout:${k.id}` ? 'sel' : '';
+    const html =
       `<span class="name">${escapeHtml(k.name || k.id)}</span>` +
       `<span class="meta">${k.w}x${k.h} @${k.x},${k.y}</span>`;
+    if (li.innerHTML !== html) li.innerHTML = html;
     li.onclick = () => {
       state.selected = `keepout:${k.id}`;
       update();
     };
-    ul.appendChild(li);
-  }
+  });
   $('keepouts-empty').classList.toggle('hidden', state.project.keepouts.length > 0);
 
   const k = selectedKeepout();
@@ -846,6 +868,43 @@ $<HTMLInputElement>('a-name').onchange = onAssetChange((a) => {
 $<HTMLInputElement>('a-locked').onchange = onAssetChange((a) => {
   a.locked = $<HTMLInputElement>('a-locked').checked;
 }, false);
+
+// Separate from the lock on purpose. Locking is about the user's own edits and
+// stops a drag; this stops the automatic placer and nothing else.
+$<HTMLInputElement>('a-nopack').onchange = onAssetChange((a) => {
+  a.excludeFromPacking = $<HTMLInputElement>('a-nopack').checked;
+}, false);
+
+function runPack(ids?: string[]): void {
+  const report = packProject(state.project, ids ? { ids } : {});
+  const parts: string[] = [];
+  parts.push(report.moved.length === 1 ? 'moved 1 asset' : `moved ${report.moved.length} assets`);
+  if (report.pinned.length) parts.push(`${report.pinned.length} held`);
+  if (report.unplaced.length) {
+    // Named rather than counted: an unplaced asset keeps its old position and
+    // may now sit under something, so the user has to know which one.
+    parts.push(`NO ROOM for ${report.unplaced.join(', ')}`);
+  }
+  state.message = parts.join(', ');
+  update();
+}
+
+$('btn-pack').onclick = () => runPack();
+
+$('btn-pack-sel').onclick = () => {
+  const a = selectedAsset();
+  if (!a) {
+    state.message = 'select an asset first';
+    renderStatus();
+    return;
+  }
+  if (a.locked || a.excludeFromPacking) {
+    state.message = `${a.name} is ${a.locked ? 'locked' : 'excluded from auto-placement'}`;
+    renderStatus();
+    return;
+  }
+  runPack([a.id]);
+};
 
 $<HTMLInputElement>('a-auto').onchange = onAssetChange((a) => {
   a.settings.depthAuto = $<HTMLInputElement>('a-auto').checked;
