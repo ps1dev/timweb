@@ -18,6 +18,7 @@ import {
   packProject,
   texelsPerHalfword,
   isPinned,
+  DEFAULT_TEXTURE_ALIGN_X,
 } from '../src/core/autopack.js';
 import {
   emptyProject,
@@ -284,14 +285,31 @@ describe('packProject', () => {
     expect(errors).toEqual([]);
   });
 
-  it('keeps CLUTs on a 16-halfword boundary', () => {
+  it('keeps CLUTs on a 16-halfword boundary at BOTH indexed depths', () => {
     const p = emptyProject();
-    for (let i = 0; i < 6; i++) addAsset(p, `t${i}`, 64, 64, 8);
+    // 8 colours quantizes to 4bpp, 200 forces 8bpp. Testing only one depth
+    // would pass with the alignment applied to just that branch.
+    for (let i = 0; i < 4; i++) addAsset(p, `small${i}`, 64, 64, 8);
+    for (let i = 0; i < 4; i++) addAsset(p, `big${i}`, 64, 64, 200);
     packProject(p);
+    const depths = new Set(p.assets.map((a) => a.settings.depth));
+    expect(depths.has(TimType.Bpp4)).toBe(true);
+    expect(depths.has(TimType.Bpp8)).toBe(true);
     for (const a of p.assets) {
       const c = clutRect(a);
       if (c) expect(c.x % CLUT_X_ALIGN).toBe(0);
     }
+  });
+
+  it('aligns packed textures to a 32-bit word by default, and honours an override', () => {
+    const p = emptyProject();
+    for (let i = 0; i < 8; i++) addAsset(p, `t${i}`, 66, 40, 8);
+    packProject(p);
+    expect(DEFAULT_TEXTURE_ALIGN_X).toBe(2);
+    for (const a of p.assets) expect(pixelRect(a).x % DEFAULT_TEXTURE_ALIGN_X).toBe(0);
+
+    packProject(p, { textureAlignX: 64 });
+    for (const a of p.assets) expect(pixelRect(a).x % 64).toBe(0);
   });
 
   it('keeps textures out of a keepout', () => {

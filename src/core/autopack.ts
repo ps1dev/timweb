@@ -42,6 +42,14 @@ import {
 } from './project.js';
 import { VRAM_WIDTH } from './vram.js';
 
+/**
+ * Default X alignment for packed textures, in halfwords.
+ *
+ * One 32-bit word. Halfword alignment is already guaranteed by the units, so
+ * this is the conservative margin, not the requirement.
+ */
+export const DEFAULT_TEXTURE_ALIGN_X = 2;
+
 /** Raw texels per VRAM halfword at each depth. The packer's width divider. */
 export function texelsPerHalfword(type: TimType): number {
   switch (type) {
@@ -71,14 +79,18 @@ export interface PackScope {
    */
   includeCluts?: boolean;
   /**
-   * X alignment for textures, in halfwords.
+   * X alignment for textures, in halfwords. 2 by default.
    *
-   * 1 by default. The upstream ROADMAP note says "textures alignX = 2 for the
-   * even-U requirement", but that figure is in the Live2D packer's 32-bit word
-   * units. In halfwords a 4bpp texture starts on a multiple of 4 texels and an
-   * 8bpp one on a multiple of 2 whatever X it sits at, so there is nothing
-   * left for an alignment to buy. Exposed rather than hardcoded because it is
-   * a hardware question and this default is my reading, not a measurement.
+   * Every position this packer emits is halfword-aligned by construction,
+   * because the whole module counts in halfwords and a texture's width is
+   * rounded up to whole ones. So the 16-bit boundary an individual VRAM
+   * upload needs is satisfied at any value here.
+   *
+   * The default is 2 rather than 1 on spicyjpeg's advice that a conservative
+   * setting is worth having when each image is uploaded to VRAM separately:
+   * it keeps two textures out of the same 32-bit word for at most one
+   * halfword of padding each. Raise it to 64 to put every texture on a page
+   * origin.
    */
   textureAlignX?: number;
   /** Refuse positions straddling the Y=256 page boundary. On by default. */
@@ -107,7 +119,7 @@ function placeablesFor(a: Asset, scope: PackScope): Placeable[] {
     width: a.width,
     height: a.height,
     widthDivider: texelsPerHalfword(depth),
-    alignX: scope.textureAlignX ?? 1,
+    alignX: scope.textureAlignX ?? DEFAULT_TEXTURE_ALIGN_X,
     flipMode: FlipMode.None,
     avoidRowStraddle: scope.avoidRowStraddle ?? true,
   });
