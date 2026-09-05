@@ -3,7 +3,12 @@
 Recorded so they are not lost, not as commitments. All three came from
 spicyjpeg, who explicitly did not push for them.
 
-## Automatic packing
+## Automatic packing - BUILT 2026-09-05
+
+Shipped as `src/core/packer.ts` (geometry) and `src/core/autopack.ts` (scope and
+write-back), with `excludeFromPacking` as a per-asset flag separate from the
+lock. What follows is the feasibility read it was built from, kept because the
+reasoning about what NOT to port is still the reason the module is small.
 
 **Feasibility read done 2026-08-23 against the real source**
 (`live2d-research/pylive2d/repack/{packer,vram,image,remap}.py`). Verdict:
@@ -42,7 +47,11 @@ existing placements as occupied space:
 
 - `Rect`, `Placeable`, `Placement`, `placeObject`, `tryPlaceObjects` (~260 lines)
 - the alignment fields, which already map onto what this tool enforces: CLUT
-  `alignX = 16`, textures `alignX = 2` for the even-U requirement
+  `alignX = 16`. **The "textures `alignX = 2` for the even-U requirement" that
+  stood here is withdrawn**: that figure is in the Live2D packer's 32-bit word
+  units, and in halfwords a 4bpp texture starts on a multiple of 4 texels and
+  an 8bpp one on a multiple of 2 wherever it sits, so the alignment buys
+  nothing and costs VRAM. Shipped as `textureAlignX`, default 1.
 - the width-divider contract - hand the packer the RAW TEXEL width and let it
   divide (4 texels/word at 4bpp, 2 at 8bpp), applied AFTER any rotation swap
 - the 64-word column-boundary constraint, which this tool already checks in
