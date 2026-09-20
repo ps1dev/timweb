@@ -4,6 +4,8 @@ A browser-based PlayStation TIM converter and VRAM layout editor. Builds to a
 single self-contained `.html` you can copy anywhere and open offline. No server,
 no install, no network.
 
+Running at <https://tools.psx.dev/timweb/>.
+
 Spiritual successor to Psy-Q's TIMTOOL (SCEE, 1998) and Lameguy64's TIMedit.
 
 ```
