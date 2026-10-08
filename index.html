@@ -57,14 +57,14 @@
   }
   .panel h2:first-child { margin-top: 0; }
 
-  #assets { list-style: none; margin: 0; padding: 0; }
-  #assets li {
+  #assets, #keepouts { list-style: none; margin: 0; padding: 0; }
+  #assets li, #keepouts li {
     padding: 5px 6px; border: 1px solid transparent; border-radius: 3px;
     cursor: pointer; display: flex; justify-content: space-between; gap: 6px;
   }
-  #assets li:hover { background: var(--panel2); }
-  #assets li.sel { background: var(--panel2); border-color: var(--accent); }
-  #assets li .meta { color: var(--dim); font-size: 11px; white-space: nowrap; }
+  #assets li:hover, #keepouts li:hover { background: var(--panel2); }
+  #assets li.sel, #keepouts li.sel { background: var(--panel2); border-color: var(--accent); }
+  #assets li .meta, #keepouts li .meta { color: var(--dim); font-size: 11px; white-space: nowrap; }
   #assets li.missing .name { color: var(--warn); }
 
   #canvas-wrap { position: relative; background: #07090b; overflow: hidden; }
