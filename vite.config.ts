@@ -8,6 +8,9 @@ import { viteSingleFile } from 'vite-plugin-singlefile';
  */
 export default defineConfig({
   test: {
+    // The specs only. The default pattern also matches the RFC workflow's
+    // node:test file under .github, which vitest cannot run.
+    include: ['test/**/*.spec.ts'],
     testTimeout: 30_000,
     hookTimeout: 120_000,
   },
