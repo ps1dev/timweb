@@ -6,7 +6,7 @@
  * hit-test, not a component tree.
  */
 
-import { TimType, halfwordWidth } from './core/tim.js';
+import { TimType, halfwordWidth, decodeToRGBA, palette as paletteAt, paletteCount } from './core/tim.js';
 import { distinctRGB555 } from './core/quantize.js';
 import { NEAR_BLACK } from './core/color.js';
 import {
@@ -28,6 +28,8 @@ import {
   assetFromTim,
   assetFromSplit,
   convertAsset,
+  buildTim,
+  paletteRows,
   autoDepth,
   clampIntoVram,
   pixelRect,
@@ -100,10 +102,29 @@ function refreshAsset(a: Asset): void {
   state.distinctCache.delete(a.id);
 }
 
+/** Palette the inspector swatches show, per asset id: the previewed row. */
+const swatchPalettes = new Map<string, Uint16Array>();
+
+/** The CLUT row the preview uses, clamped to the rows the asset has. */
+function previewRow(a: Asset): number {
+  return Math.max(0, Math.min(paletteRows(a) - 1, a.paletteRow ?? 0));
+}
+
 function rebuildPreview(a: Asset): void {
+  swatchPalettes.delete(a.id);
   if (a.settings.depth === TimType.Bpp16 || !a.converted) {
     previews.set(`tex:${a.id}`, previewFromRGBA(a.rgba, a.width, a.height));
     previews.delete(`clut:${a.id}`);
+    return;
+  }
+  if (paletteRows(a) > 1) {
+    // Rendered through the TIM that export would write, with the chosen CLUT row.
+    const tim = buildTim(a);
+    const row = previewRow(a);
+    const { rgba } = decodeToRGBA(tim, { paletteIndex: row, stpAsOpaque: true });
+    previews.set(`tex:${a.id}`, previewFromRGBA(rgba, a.width, a.height));
+    previews.set(`clut:${a.id}`, previewFromPalette(tim.clut!.data, paletteCount(tim)));
+    swatchPalettes.set(a.id, paletteAt(tim, row)!);
     return;
   }
   const { indices, palette, transparentIndex } = a.converted;
@@ -382,7 +403,12 @@ function renderInspector(): void {
 
   const texWords = halfwordWidth(a.width, a.settings.depth) * a.height;
   $('a-texwords').textContent = `${texWords} hw`;
-  $('a-clutwords').textContent = `${CLUT_WORDS[a.settings.depth]} hw`;
+  const rows = paletteRows(a);
+  $('a-clutwords').textContent = `${CLUT_WORDS[a.settings.depth] * Math.max(rows, 1)} hw`;
+  $('a-palrow-row').classList.toggle('hidden', rows < 2);
+  $<HTMLInputElement>('a-palrow').max = String(Math.max(rows - 1, 0));
+  $<HTMLInputElement>('a-palrow').value = String(previewRow(a));
+  $('a-palrow-of').textContent = `of ${rows}`;
 
   $<HTMLInputElement>('a-dither').checked = a.settings.dither;
   $<HTMLSelectElement>('a-blackmode').value = a.settings.blackMode;
@@ -429,7 +455,7 @@ function renderInspector(): void {
     $('q-note').textContent = a.converted.lossless
       ? 'Image fitted the palette exactly; the quantizer did not run.'
       : 'Anything past the 5-bit floor of 7 is the quantizer, not the format. This is an error metric, not a verdict - judge it with your eyes.';
-    renderSwatches(a.converted.palette);
+    renderSwatches(swatchPalettes.get(a.id) ?? a.converted.palette);
   }
 
   $<HTMLInputElement>('a-x').value = String(a.x);
@@ -697,8 +723,16 @@ $<HTMLInputElement>('file-project').onchange = async (e) => {
     const text = await file.text();
     // Keep any already-loaded pixels: a project file stores layout, not art,
     // so re-attaching by name is how a saved layout comes back to life.
-    const existing = new Map(state.project.assets.map((a) => [a.name, a.rgba]));
-    const { project, missing } = deserializeProject(text, (n) => existing.get(n));
+    const existing = new Map(state.project.assets.map((a) => [a.name, a]));
+    const { project, missing } = deserializeProject(text, (n) => existing.get(n)?.rgba);
+    // Imported CLUT rows are art too, and come back with the pixels they index.
+    for (const a of project.assets) {
+      const prior = existing.get(a.name);
+      if (prior?.indexed && prior.width === a.width && prior.height === a.height) {
+        a.indexed = prior.indexed;
+        a.paletteRow = prior.paletteRow;
+      }
+    }
     state.project = project;
     previews.clear();
     state.distinctCache.clear();
@@ -915,6 +949,11 @@ $<HTMLSelectElement>('a-depth').onchange = onAssetChange((a) => {
   a.settings.depthAuto = false;
 });
 
+$<HTMLInputElement>('a-palrow').onchange = onAssetChange((a) => {
+  a.paletteRow = Math.max(0, Number($<HTMLInputElement>('a-palrow').value) || 0);
+  rebuildPreview(a);
+}, false);
+
 $<HTMLInputElement>('a-dither').onchange = onAssetChange((a) => {
   a.settings.dither = $<HTMLInputElement>('a-dither').checked;
 });
@@ -979,7 +1018,7 @@ $('a-autoplace').onclick = onAssetChange((a) => {
       ...others,
       { id: 'pending', kind: 'texture' as const, rect: { ...spot, w: pr.w, h: pr.h } },
     ];
-    const cspot = findFreeSpot(withTex, cr.w, 1, { alignX: CLUT_X_ALIGN, fromBottom: true, height: H });
+    const cspot = findFreeSpot(withTex, cr.w, cr.h, { alignX: CLUT_X_ALIGN, fromBottom: true, height: H });
     if (cspot) {
       a.clutX = cspot.x;
       a.clutY = cspot.y;

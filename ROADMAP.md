@@ -133,8 +133,8 @@ keepouts and locking in place the natural shape is "pack the unplaced" or
 ## Multiple palettes with a colour-cycling editor
 
 The format already supports it - a CLUT section with height > 1 is N palettes
-stacked, and `VP-hack/main-menu/00007.tim` is a real 16x2 specimen. The parser
-handles it; nothing in the UI exposes it.
+stacked, and `VP-hack/main-menu/00007.tim` is a real 16x2 specimen. Importing
+one keeps every row (below), but nothing edits them.
 
 CLUT cycling is the cheap PS1 way to do gradient sweeps, glows and pulses:
 rewrite 16 or 256 entries per frame, every indexed pixel shifts at once, no
@@ -146,11 +146,21 @@ The real gap is not the editor, it is that a cycling palette needs a main-RAM
 master copy and a VRAM destination, i.e. a palette that is a resource rather
 than a static page. Worth reading the sdvx-anim notes before starting.
 
-## Multi-palette TIM export
+## Multi-palette TIM export - BUILT 2026-10-07
 
-Falls out of the above: emit a CLUT section with height N. Cheap once the
-project model can hold more than one palette per asset, which it currently
-cannot - `Asset.converted` is a single `QuantizeResult`.
+Importing a TIM whose CLUT is more than one row keeps its indices and every
+row on the asset (`Asset.indexed`), and export writes them back as a CLUT of
+height N, one palette per row - clutter's `clutLayout` with `palettesPerRow`
+at 1. The inspector gets a palette-row selector for the preview, shown only
+when there is more than one. The palettes are used as they are, not
+requantized: decoding row 0 and requantizing can merge indices that the other
+rows tell apart. Changing the depth drops back to one quantized palette.
+Import then export is byte-identical, including on `00007.tim`.
+
+Not in the project file, same as the pixels: reloading a layout brings the rows
+back with the art. A multi-row CLUT that is not exactly its depth's 16 or 256
+entries wide (palettes side by side, say) still imports its first palette only,
+with a warning.
 
 TIMedit does not support multi-image TIMs at all, so this is a place where
 being newer could actually mean being better.

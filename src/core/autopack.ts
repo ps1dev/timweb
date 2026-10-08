@@ -34,6 +34,7 @@ import {
 import { TimType } from './tim.js';
 import {
   clutRect,
+  paletteRows,
   pixelRect,
   projectPlacements,
   vramHeight,
@@ -128,7 +129,7 @@ function placeablesFor(a: Asset, scope: PackScope): Placeable[] {
     out.push({
       key: `clut:${a.id}`,
       width: depth === TimType.Bpp4 ? 16 : 256,
-      height: 1,
+      height: paletteRows(a),
       alignX: CLUT_X_ALIGN,
       flipMode: FlipMode.None,
     });
