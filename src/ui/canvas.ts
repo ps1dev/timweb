@@ -393,11 +393,11 @@ export function previewFromRGBA(
 }
 
 /** Render a palette as a 1-pixel-tall strip, for drawing a CLUT in place. */
-export function previewFromPalette(palette: Uint16Array): HTMLCanvasElement {
+export function previewFromPalette(palette: Uint16Array, rows = 1): HTMLCanvasElement {
   const c = document.createElement('canvas');
-  c.width = palette.length;
-  c.height = 1;
-  const img = new ImageData(palette.length, 1);
+  c.width = palette.length / rows;
+  c.height = rows;
+  const img = new ImageData(c.width, rows);
   for (let i = 0; i < palette.length; i++) {
     const v = palette[i];
     const o = i * 4;

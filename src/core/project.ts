@@ -18,6 +18,9 @@ import {
   parseTim,
   decodeToRGBA,
   texelWidth,
+  getTexel,
+  paletteCount,
+  palette,
   timToSplit,
   serializeSplit,
   parseSplit,
@@ -32,7 +35,7 @@ import {
   type QuantizeResult,
   type BlackMode,
 } from './quantize.js';
-import { NEAR_BLACK } from './color.js';
+import { NEAR_BLACK, scoreAgainstSource } from './color.js';
 import {
   CLUT_X_ALIGN,
   PAGE_WIDTH,
@@ -111,6 +114,36 @@ export interface Asset {
   clutY: number;
   /** Result of the last conversion, if it has been run. */
   converted?: QuantizeResult;
+  /**
+   * Indices and every palette row of an imported TIM whose CLUT holds more
+   * than one palette. While the depth matches, conversion uses these as they
+   * are instead of quantizing, and export writes every row: the other
+   * palettes index the same texels, so requantizing the decoded first
+   * palette would leave them pointing at the wrong entries. Not serialized,
+   * same as `rgba`.
+   */
+  indexed?: IndexedSource;
+  /** CLUT row the preview renders with. Preview only; export writes every row. */
+  paletteRow?: number;
+}
+
+export interface IndexedSource {
+  depth: TimType.Bpp4 | TimType.Bpp8;
+  /** One index per texel, row-major. */
+  indices: Uint8Array;
+  /** One palette per CLUT row, each the depth's full width (16 or 256). */
+  palettes: Uint16Array[];
+}
+
+/** The imported indexed data, if it still applies at the asset's depth. */
+function activeIndexed(asset: Asset): IndexedSource | undefined {
+  return asset.indexed?.depth === asset.settings.depth ? asset.indexed : undefined;
+}
+
+/** Palettes the asset's CLUT holds: 0 at 16bpp, otherwise at least 1. */
+export function paletteRows(asset: Asset): number {
+  if (asset.settings.depth === TimType.Bpp16) return 0;
+  return activeIndexed(asset)?.palettes.length ?? 1;
 }
 
 export const DEFAULT_IMAGE_SUFFIX = '_image.dat';
@@ -237,7 +270,7 @@ export function clutRect(asset: Asset): VramRect | undefined {
     x: asset.clutX,
     y: asset.clutY,
     w: asset.settings.depth === TimType.Bpp4 ? 16 : 256,
-    h: 1,
+    h: paletteRows(asset),
   };
 }
 
@@ -307,12 +340,47 @@ export function convertAsset(asset: Asset): QuantizeResult | undefined {
     asset.converted = undefined;
     return undefined;
   }
+  const indexed = activeIndexed(asset);
+  if (indexed) {
+    asset.converted = resultFromIndexed(asset, indexed);
+    return asset.converted;
+  }
   const result = quantize(asset.rgba, asset.width, asset.height, {
     maxColors: paletteSizeFor(asset.settings.depth),
     ...quantizeOptionsFor(asset.settings),
   });
   asset.converted = result;
   return result;
+}
+
+/**
+ * Imported indices and palette 0 dressed as a quantizer result, so the
+ * inspector and preview treat them like any other conversion. Exact by
+ * construction: `rgba` was decoded from this palette.
+ */
+function resultFromIndexed(asset: Asset, src: IndexedSource): QuantizeResult {
+  const pal = src.palettes[0];
+  const bands = { transparent: 0, semi: 0, solid: 0 };
+  for (const i of src.indices) {
+    const v = pal[i];
+    if (v === 0) bands.transparent++;
+    else if (v & 0x8000) bands.semi++;
+    else bands.solid++;
+  }
+  let stpEntries = 0;
+  for (const v of pal) if (v & 0x8000) stpEntries++;
+  return {
+    palette: pal,
+    indices: src.indices,
+    transparentIndex: -1,
+    report: scoreAgainstSource(asset.rgba, asset.rgba),
+    lossless: true,
+    collisions: 0,
+    method: `imported, ${src.palettes.length} palettes`,
+    bands,
+    stpEntries,
+    blackMode: asset.settings.blackMode,
+  };
 }
 
 /**
@@ -368,7 +436,7 @@ export function clampIntoVram(asset: Asset, height = VRAM_HEIGHT): void {
   if (c) {
     asset.clutX = Math.max(0, Math.min(VRAM_WIDTH - c.w, asset.clutX));
     asset.clutX = Math.round(asset.clutX / CLUT_X_ALIGN) * CLUT_X_ALIGN;
-    asset.clutY = Math.max(0, Math.min(height - 1, asset.clutY));
+    asset.clutY = Math.max(0, Math.min(height - c.h, asset.clutY));
   }
 }
 
@@ -389,7 +457,7 @@ export function buildTim(asset: Asset): Tim {
   const result = asset.converted ?? convertAsset(asset)!;
   return timFromIndexed(
     result.indices,
-    result.palette,
+    activeIndexed(asset)?.palettes ?? result.palette,
     asset.width,
     asset.height,
     depth,
@@ -436,6 +504,9 @@ export function createAsset(
       height,
       rgba,
       converted: undefined,
+      // The new art is not the imported TIM's indices any more.
+      indexed: undefined,
+      paletteRow: undefined,
     };
   }
 
@@ -514,6 +585,30 @@ export function assetFromTim(
   const settings = defaultSettings();
   settings.depth = tim.type as SelectableDepth;
   settings.depthAuto = false;
+  const warnings = diagnostics.map((d) => d.message);
+
+  // Every CLUT row is kept when there is more than one. A single palette goes
+  // through the quantizer as before, which reproduces it from the decoded art.
+  let indexed: IndexedSource | undefined;
+  const rows = paletteCount(tim);
+  if (rows > 1 && (tim.type === TimType.Bpp4 || tim.type === TimType.Bpp8)) {
+    const slots = tim.type === TimType.Bpp4 ? 16 : 256;
+    if (tim.clut!.w === slots) {
+      const indices = new Uint8Array(width * height);
+      for (let y = 0; y < height; y++) {
+        for (let x = 0; x < width; x++) {
+          indices[y * width + x] = getTexel(tim.pixels, tim.type, x, y);
+        }
+      }
+      const palettes: Uint16Array[] = [];
+      for (let i = 0; i < rows; i++) palettes.push(palette(tim, i)!.slice());
+      indexed = { depth: tim.type, indices, palettes };
+    } else {
+      warnings.push(
+        `CLUT is ${tim.clut!.w}x${rows}, not ${slots} wide; only the first row's palette is kept`,
+      );
+    }
+  }
 
   return {
     asset: {
@@ -526,8 +621,9 @@ export function assetFromTim(
       y: tim.pixels.y,
       clutX: tim.clut?.x ?? 0,
       clutY: tim.clut?.y ?? 511,
+      ...(indexed ? { indexed } : {}),
     },
-    warnings: diagnostics.map((d) => d.message),
+    warnings,
   };
 }
 

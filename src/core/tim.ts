@@ -528,15 +528,20 @@ export function timFromRGBA16(
 }
 
 /**
- * Build a 4bpp or 8bpp TIM from palette indices plus a palette.
+ * Build a 4bpp or 8bpp TIM from palette indices plus one or more palettes.
  *
- * `indices` is one byte per texel, row-major, `width` wide. The palette is
+ * `indices` is one byte per texel, row-major, `width` wide. Each palette is
  * 16-bit RGB555 entries; it is padded up to the CLUT width the depth requires
  * (16 for 4bpp, 256 for 8bpp) so the section is a legal VRAM rectangle.
+ *
+ * Several palettes stack vertically, one per CLUT row, so the section is
+ * `h = palettes.length` rows tall and row N is palette N. That is clutter's
+ * `clutLayout` with `palettesPerRow` fixed at 1: the layout `paletteCount`
+ * and `palette` read back, and the one a program pages through by CLUT row.
  */
 export function timFromIndexed(
   indices: Uint8Array,
-  palette: Uint16Array,
+  palette: Uint16Array | readonly Uint16Array[],
   width: number,
   height: number,
   type: TimType.Bpp4 | TimType.Bpp8,
@@ -549,8 +554,12 @@ export function timFromIndexed(
     );
   }
   const clutWidth = type === TimType.Bpp4 ? 16 : 256;
-  if (palette.length > clutWidth) {
-    throw new Error(`palette has ${palette.length} entries, max ${clutWidth} at this depth`);
+  const palettes = palette instanceof Uint16Array ? [palette] : palette;
+  if (palettes.length === 0) throw new Error('an indexed TIM needs at least one palette');
+  for (const p of palettes) {
+    if (p.length > clutWidth) {
+      throw new Error(`palette has ${p.length} entries, max ${clutWidth} at this depth`);
+    }
   }
 
   const w = width / perHalfword;
@@ -567,13 +576,19 @@ export function timFromIndexed(
     }
   }
 
-  const clutData = new Uint16Array(clutWidth);
-  clutData.set(palette);
+  const clutData = new Uint16Array(clutWidth * palettes.length);
+  palettes.forEach((p, row) => clutData.set(p, row * clutWidth));
 
   return {
     type,
     rawFlags: type | FLAG_HAS_CLUT,
-    clut: { x: placement.clutX, y: placement.clutY, w: clutWidth, h: 1, data: clutData },
+    clut: {
+      x: placement.clutX,
+      y: placement.clutY,
+      w: clutWidth,
+      h: palettes.length,
+      data: clutData,
+    },
     pixels,
   };
 }

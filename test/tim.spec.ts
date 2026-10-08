@@ -347,6 +347,26 @@ describe('construction', () => {
     expect(tim.pixels.w).toBe(2); // 8 texels at 4bpp = 2 halfwords
   });
 
+  it('stacks several palettes one per CLUT row, each padded to the depth width', () => {
+    const tim = timFromIndexed(
+      new Uint8Array(8),
+      [new Uint16Array([0x7fff, 0x001f]), new Uint16Array([0x03e0]), new Uint16Array([0x7c00])],
+      8,
+      1,
+      TimType.Bpp4,
+      { x: 0, y: 0, clutX: 0, clutY: 480 },
+    );
+    expect(tim.clut!.w).toBe(16);
+    expect(tim.clut!.h).toBe(3);
+    expect(paletteCount(tim)).toBe(3);
+    expect(Array.from(palette(tim, 0)!.subarray(0, 3))).toEqual([0x7fff, 0x001f, 0]);
+    expect(Array.from(palette(tim, 1)!.subarray(0, 2))).toEqual([0x03e0, 0]);
+    expect(palette(tim, 2)![0]).toBe(0x7c00);
+    const back = parseTim(serializeTim(tim)).tim!;
+    expect(back.clut!.h).toBe(3);
+    expect(Array.from(back.clut!.data)).toEqual(Array.from(tim.clut!.data));
+  });
+
   it('refuses a width that cannot pack into whole halfwords', () => {
     expect(() =>
       timFromIndexed(new Uint8Array(7), new Uint16Array(16), 7, 1, TimType.Bpp8, {

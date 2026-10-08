@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'vitest';
-import { TimType, parseTim, serializeTim, texelWidth } from '../src/core/tim.js';
+import { existsSync, readFileSync } from 'node:fs';
+import { TimType, parseTim, serializeTim, texelWidth, paletteCount, type Tim } from '../src/core/tim.js';
 import { crc32, buildZip } from '../src/core/zip.js';
 import { toRaw, rawFromSerializedTim } from '../src/core/raw.js';
 import {
@@ -20,6 +21,7 @@ import {
   exportProject,
   makeId,
   clampIntoVram,
+  paletteRows,
   type Asset,
   type Project,
 } from '../src/core/project.js';
@@ -720,5 +722,132 @@ describe('locked assets', () => {
     a.locked = true;
     addAsset(p, 'other', 64, 64, 8);
     expect(validate(p).filter((i) => i.code === 'overlap')).toEqual([]);
+  });
+});
+
+describe('multi-palette TIMs', () => {
+  /**
+   * A TIM with `rows` palettes stacked in its CLUT, built by hand rather than
+   * through timFromIndexed so the export path is not checked against itself.
+   * Palette 0 repeats every colour twice while the other rows do not: decoding
+   * row 0 and requantizing would merge those index pairs and break every
+   * other row, which is the failure this has to catch.
+   */
+  function multiClutTim(
+    type: TimType.Bpp4 | TimType.Bpp8,
+    width: number,
+    height: number,
+    rows: number,
+  ): Uint8Array {
+    const slots = type === TimType.Bpp4 ? 16 : 256;
+    const w = width / (type === TimType.Bpp4 ? 4 : 2);
+    const pixels = new Uint16Array(w * height);
+    for (let i = 0; i < pixels.length; i++) pixels[i] = (i * 0x9e37 + 0x1234) & 0xffff;
+    const clut = new Uint16Array(slots * rows);
+    for (let r = 0; r < rows; r++) {
+      for (let i = 0; i < slots; i++) {
+        clut[r * slots + i] =
+          r === 0
+            ? i < 2
+              ? 0
+              : (((i >> 1) * 0x0421) & 0x7fff) | (i % 7 === 0 ? 0x8000 : 0)
+            : ((i * 31 + r * 977) & 0x7fff) | (r & 1 && i % 5 === 0 ? 0x8000 : 0);
+      }
+    }
+    const tim: Tim = {
+      type,
+      rawFlags: type | 0x08,
+      clut: { x: 32, y: 496, w: slots, h: rows, data: clut },
+      pixels: { x: 640, y: 256, w, h: height, data: pixels },
+    };
+    return serializeTim(tim);
+  }
+
+  function importInto(p: Project, name: string, bytes: Uint8Array): Asset {
+    const result = assetFromTim(name, bytes);
+    if ('error' in result) throw new Error(result.error);
+    const asset: Asset = { ...result.asset, id: makeId() };
+    p.assets.push(asset);
+    return asset;
+  }
+
+  const exportedTim = (p: Project, name: string) =>
+    exportProject(p).entries.find((e) => e.name === `${name}.tim`)!.data;
+
+  for (const [label, type, width, height, rows] of [
+    ['4bpp, 2 palettes', TimType.Bpp4, 64, 16, 2],
+    ['8bpp, 2 palettes', TimType.Bpp8, 32, 8, 2],
+    ['4bpp, 5 palettes', TimType.Bpp4, 16, 4, 5],
+  ] as const) {
+    it(`exports an imported ${label} TIM byte-identical to the input`, () => {
+      const input = multiClutTim(type, width, height, rows);
+      expect(paletteCount(parseTim(input).tim!)).toBe(rows);
+      const p = emptyProject();
+      importInto(p, 'multi', input);
+      expect(exportedTim(p, 'multi')).toEqual(input);
+    });
+  }
+
+  it("writes the CLUT header's h as the asset's palette count", () => {
+    const p = emptyProject();
+    const a = importInto(p, 'multi', multiClutTim(TimType.Bpp8, 32, 8, 3));
+    expect(paletteRows(a)).toBe(3);
+    expect(buildTim(a).clut!.h).toBe(3);
+    expect(clutRect(a)!.h).toBe(3);
+    // Straight off the bytes: 8-byte file header, then the CLUT section's
+    // u32 length and x, y, w, h as u16s.
+    const out = exportedTim(p, 'multi');
+    const view = new DataView(out.buffer, out.byteOffset, out.byteLength);
+    expect(view.getUint16(8 + 10, true)).toBe(3);
+  });
+
+  it('keeps one palette for a single-row CLUT, as before', () => {
+    const p = emptyProject();
+    const a = importInto(p, 'one', multiClutTim(TimType.Bpp4, 16, 4, 1));
+    expect(a.indexed).toBeUndefined();
+    expect(paletteRows(a)).toBe(1);
+    expect(buildTim(a).clut!.h).toBe(1);
+  });
+
+  it('drops the extra rows once the depth changes, since they index the old texels', () => {
+    const p = emptyProject();
+    const a = importInto(p, 'multi', multiClutTim(TimType.Bpp4, 16, 4, 2));
+    a.settings.depth = TimType.Bpp8;
+    a.converted = undefined;
+    expect(paletteRows(a)).toBe(1);
+    expect(buildTim(a).clut!.h).toBe(1);
+  });
+
+  it('forgets the imported rows when new art is imported under the same name', () => {
+    const p = emptyProject();
+    importInto(p, 'multi', multiClutTim(TimType.Bpp4, 16, 4, 2));
+    const fresh = createAsset('multi', 16, 4, rgbaBlocks(16, 4, 4), p);
+    expect(fresh.indexed).toBeUndefined();
+    expect(paletteRows(fresh)).toBe(1);
+  });
+
+  it('reserves every CLUT row when clamping into VRAM', () => {
+    const p = emptyProject();
+    const a = importInto(p, 'multi', multiClutTim(TimType.Bpp4, 16, 4, 4));
+    a.clutY = 511;
+    clampIntoVram(a);
+    expect(a.clutY).toBe(508);
+  });
+
+  it('writes no palette fields into the project file', () => {
+    const p = emptyProject();
+    importInto(p, 'multi', multiClutTim(TimType.Bpp4, 16, 4, 2));
+    const json = serializeProject(p);
+    expect(json).not.toMatch(/indexed|paletteRow/);
+    const { project } = deserializeProject(json);
+    expect(paletteRows(project.assets[0])).toBe(1);
+  });
+
+  const VP_HACK = '/home/pixel/sources/VP-hack/main-menu/00007.tim';
+  it.runIf(existsSync(VP_HACK))('exports VP-hack 00007.tim, a shipped two-palette TIM, byte-identical', () => {
+    const input = new Uint8Array(readFileSync(VP_HACK));
+    const p = emptyProject();
+    importInto(p, '00007', input);
+    expect(exportedTim(p, '00007')).toEqual(input);
   });
 });

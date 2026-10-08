@@ -208,6 +208,9 @@
         </label>
         <div class="field"><span class="k">texture VRAM</span><span class="v" id="a-texwords">-</span></div>
         <div class="field"><span class="k">CLUT VRAM</span><span class="v" id="a-clutwords">-</span></div>
+        <label class="hidden" id="a-palrow-row" title="Which CLUT row the preview renders with. Export writes every row.">palette row
+          <input type="number" id="a-palrow" min="0" value="0" style="width:60px"> <span id="a-palrow-of"></span>
+        </label>
 
         <h2>Conversion</h2>
         <label><input type="checkbox" id="a-dither"> dither (Floyd-Steinberg)</label>
