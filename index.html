@@ -31,6 +31,7 @@
   }
   #toolbar .sep { width: 1px; height: 20px; background: var(--line); margin: 0 4px; }
   #toolbar .grow { flex: 1; }
+  #btn-manual { color: var(--accent); padding: 0 6px; }
 
   button, select, input[type=number], input[type=text] {
     background: var(--panel2); color: var(--text);
@@ -139,6 +140,7 @@
     <button id="btn-pack" title="Place every asset that is not locked or excluded. Keepouts and pinned assets are treated as occupied.">Auto-place all</button>
     <button id="btn-pack-sel" title="Re-place only the selected asset, leaving everything else where it is.">Auto-place selected</button>
     <span class="grow"></span>
+    <a id="btn-manual" href="https://tools.psx.dev/timweb/manual/" target="_blank" rel="noopener">Manual</a>
   </div>
 
   <div id="main">

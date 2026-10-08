@@ -4,14 +4,15 @@ A browser-based PlayStation TIM converter and VRAM layout editor. Builds to a
 single self-contained `.html` you can copy anywhere and open offline. No server,
 no install, no network.
 
-Running at <https://tools.psx.dev/timweb/>.
+Running at <https://tools.psx.dev/timweb/>. The [manual](https://tools.psx.dev/timweb/manual/)
+walks through every panel with annotated screenshots.
 
 Spiritual successor to Psy-Q's TIMTOOL (SCEE, 1998) and Lameguy64's TIMedit.
 
 ```
 npm install
 npm run dev      # dev server
-npm run build    # -> dist/index.html, one file, ~50 KB
+npm run build    # -> dist/index.html, one file, ~80 KB, plus dist/manual/
 npm test         # typecheck + unit + browser end-to-end
 ```
 
@@ -60,8 +61,8 @@ depths. Since the `.dat` files carry no dimensions, the VRAM map records them.
 A keepout is a named rectangle that reserves VRAM. Framebuffers are keepouts
 with a preset size, which is the whole of the difference. Assets can be
 **locked**, which prevents dragging and makes Find free space refuse to move
-them - deliberately NOT the same flag as "exclude from packing", which will
-arrive with a packer if one ever does.
+them - deliberately NOT the same flag as "exclude from auto-placement", which
+keeps the packer off an asset that can still be dragged.
 
 Two reserved regions overlapping each other is not an issue. A keepout may
 quite reasonably cover a framebuffer, and flagging it would be the tool arguing
@@ -169,8 +170,9 @@ pipeline with no power over whether the page runs.
 
 ## Not built
 
-See `ROADMAP.md`: automatic packing, multi-palette CLUTs with a colour-cycling
-editor, and multi-palette TIM export. Recorded rather than committed to.
+See `ROADMAP.md`: a colour-cycling editor for multi-palette CLUTs, recorded
+rather than committed to. The automatic packing and multi-palette TIM export
+recorded there are built.
 
 ## On the quantizer
 

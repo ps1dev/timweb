@@ -1,0 +1,194 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>timweb manual</title>
+<style>
+  :root { --bg: #0f1215; --panel: #161a1f; --line: #2a3038; --text: #d6dbe1; --dim: #8a929c; --accent: #ffcc33; }
+  body { margin: 0; background: var(--bg); color: var(--text); font: 15px/1.55 system-ui, sans-serif; }
+  main { max-width: 1100px; margin: 0 auto; padding: 24px 20px 80px; }
+  h1 { margin: 0 0 4px; font-size: 26px; }
+  h2 { margin: 44px 0 8px; font-size: 20px; border-bottom: 1px solid var(--line); padding-bottom: 4px; }
+  a { color: var(--accent); }
+  code, kbd { font: 13px ui-monospace, monospace; background: var(--panel); border: 1px solid var(--line); border-radius: 3px; padding: 0 4px; }
+  img { display: block; width: 100%; height: auto; border: 1px solid var(--line); border-radius: 4px; margin: 12px 0; }
+  nav ol { columns: 2; padding-left: 20px; }
+  ol.notes li, ul li { margin: 3px 0; }
+  .dim { color: var(--dim); }
+</style>
+</head>
+<body>
+<main>
+<h1>timweb manual</h1>
+<p class="dim">A browser PlayStation TIM converter and VRAM layout editor. <a href="../">Open timweb</a>.
+The numbered labels in each screenshot match the numbered notes under it.</p>
+
+<nav><ol>
+  <li><a href="#start">Getting started</a></li>
+  <li><a href="#layout">The window</a></li>
+  <li><a href="#canvas">The VRAM canvas</a></li>
+  <li><a href="#keepouts">Keepouts and framebuffers</a></li>
+  <li><a href="#depth">Depth</a></li>
+  <li><a href="#conversion">Conversion and transparency</a></li>
+  <li><a href="#quality">Reading the quality figures</a></li>
+  <li><a href="#palettes">Palettes and CLUT rows</a></li>
+  <li><a href="#placement">Placement</a></li>
+  <li><a href="#project">Project settings</a></li>
+  <li><a href="#checks">Checks</a></li>
+  <li><a href="#export">Export</a></li>
+  <li><a href="#template">Placement templates</a></li>
+</ol></nav>
+
+<h2 id="start">1. Getting started</h2>
+<p>Everything runs in the page: nothing is uploaded anywhere, and the whole tool is one HTML file you can save and open offline.</p>
+<img src="01-empty.png" alt="timweb with nothing loaded">
+<ol class="notes">
+  <li>Import PNG, JPEG, GIF, WebP or BMP, anything the browser can decode.</li>
+  <li>Import an existing <code>.tim</code>, or a split <code>.pxl</code> + <code>.clt</code> pair (matched by base name). A TIM is placed at the VRAM position written in it.</li>
+  <li>Dropping files on the canvas does the same as either button.</li>
+  <li>Each import becomes an asset in this list.</li>
+  <li>While nothing is selected the right panel shows the settings for the whole project.</li>
+</ol>
+
+<h2 id="layout">2. The window</h2>
+<img src="02-overview.png" alt="timweb with four assets loaded">
+<ol class="notes">
+  <li>Toolbar: import, project files, export formats, 2MB VRAM, view mode, zoom, snapping and auto-placement.</li>
+  <li>Assets. The text on the right is size, depth, and a <code>*</code> when the depth was chosen automatically.</li>
+  <li>Keepouts: VRAM that auto-placement must leave alone. The two framebuffers are keepouts.</li>
+  <li>How much of VRAM is used, free, and claimed twice.</li>
+  <li>The canvas is VRAM itself. Every coordinate is in 16-bit halfwords, the unit the GPU uses for VRAM, not in texels.</li>
+  <li>The inspector shows whatever is selected, with the project settings underneath.</li>
+  <li>Status bar: asset and issue counts, cursor position, last action.</li>
+  <li>The link to this manual.</li>
+</ol>
+
+<h2 id="canvas">3. The VRAM canvas</h2>
+<p>Click to select, drag to move. The arrow keys nudge the selection by one halfword, <kbd>Shift</kbd>+arrow by 16, and <kbd>Delete</kbd> removes it. Pan with the middle button or <kbd>Shift</kbd>+drag; the wheel zooms about the cursor.</p>
+<img src="03-canvas.png" alt="zoomed canvas with the hover readout">
+<ol class="notes">
+  <li>View: <b>Normal</b> draws the textures, <b>Overlap</b> paints anything claimed twice, <b>Free space</b> shows what is left.</li>
+  <li>Zoom buttons; <b>Fit</b> brings all of VRAM back into view.</li>
+  <li>Snapping while dragging: to a grid of the given size in halfwords, and to the edges of other placements.</li>
+  <li><b>Auto-place all</b> packs every asset that is neither locked nor excluded around the keepouts and pinned assets. <b>Auto-place selected</b> moves only the selection.</li>
+  <li>The hover readout: VRAM coordinate in halfwords, texture page number, and what sits under the cursor (an asset, <code>reserved</code>, <code>free</code>, or <code>-OVERLAP-</code>).</li>
+  <li>The same coordinate in the status bar.</li>
+</ol>
+
+<h2 id="keepouts">4. Keepouts and framebuffers</h2>
+<p>A keepout is a named rectangle of reserved VRAM. A framebuffer is just a keepout with a standard size, so side-by-side, stacked or padded layouts are a matter of moving rectangles.</p>
+<img src="04-keepouts.png" alt="a framebuffer keepout selected">
+<ol class="notes">
+  <li>Insert a framebuffer at 320x240, 320x256, 368x240, 512x240 or 640x480.</li>
+  <li><b>+</b> adds a blank keepout to size by hand.</li>
+  <li>Click a keepout to select it, or click it on the canvas.</li>
+  <li>Its name, position and size, in halfwords. Drag it on the canvas or type coordinates.</li>
+</ol>
+
+<h2 id="depth">5. Depth</h2>
+<img src="05-depth.png" alt="the depth section of the inspector">
+<ol class="notes">
+  <li><b>Locked</b> pins the asset: it cannot be dragged and auto-placement will not move it.</li>
+  <li><b>Excluded</b> only keeps auto-placement off it; you can still drag it. The two flags are independent.</li>
+  <li><b>Auto</b> lets the cost model choose: the cheapest of 4bpp, 8bpp and 16bpp in texture plus CLUT VRAM, among the depths that pass the quality floor (see <a href="#project">Project settings</a>).</li>
+  <li>Or choose the depth yourself, which turns auto off for that asset.</li>
+  <li>What the texture and its CLUT will occupy, in halfwords.</li>
+  <li>The <code>*</code> in the list marks depths auto picked.</li>
+</ol>
+
+<h2 id="conversion">6. Conversion and transparency</h2>
+<p>Each texel ends up in one of three states, decided by its alpha: a hole (fully transparent), semi-transparent (STP bit set, blended by the primitive), or solid.</p>
+<img src="06-conversion.png" alt="the conversion section of the inspector">
+<ol class="notes">
+  <li>Floyd-Steinberg dithering. Off by default: it speckles flat areas, and PS1 textures are usually magnified.</li>
+  <li>Opaque black cannot stay <code>0x0000</code>, because the GPU draws that value as transparent. Choose dark grey (always opaque) or semi-transparent black <code>0x8000</code>.</li>
+  <li>The colour used for opaque black in dark grey mode; <code>0x0421</code> by default.</li>
+  <li>Set STP on every texel. Additive and subtractive blending only affect texels with STP set, whatever the primitive asks for.</li>
+  <li>Alpha below this value becomes a hole.</li>
+  <li>Alpha at or above this value is solid. Anything between the two is semi-transparent.</li>
+</ol>
+
+<h2 id="quality">7. Reading the quality figures</h2>
+<p>Converting 8-bit colour to the PlayStation's 5 bits per channel can miss by up to 7 on its own, so these figures count any error past 7 against the palette.</p>
+<img src="07-quality.png" alt="the quality section for a 4bpp conversion">
+<ol class="notes">
+  <li>How the palette was made: <code>exact (no loss)</code> when the image already fits, otherwise the quantizer's name.</li>
+  <li>Worst error on any channel of any texel, 0 to 255. Green at 7 or below.</li>
+  <li>Share of texels worse than the 7 the format costs anyway. Opaque black substituted by dark grey is counted separately, and holes are not graded.</li>
+  <li>Palette entries that became identical after rounding to 5 bits.</li>
+  <li>Texel count in each transparency state.</li>
+  <li>The palette. Checkered entries are <code>0x0000</code>, which the GPU draws as transparent.</li>
+</ol>
+<p class="dim">These are error figures, not a verdict. A palette can score better and still look worse: judge the canvas with your eyes.</p>
+
+<h2 id="palettes">8. Palettes and CLUT rows</h2>
+<p>A TIM can carry several palettes as extra rows of its CLUT. timweb keeps all of them when importing and writes all of them back.</p>
+<img src="08-palettes.png" alt="a two-palette TIM previewed with its second palette">
+<ol class="notes">
+  <li>The palette row the canvas preview uses. This only changes the preview; export always writes every row.</li>
+  <li>A 4bpp CLUT row is 16 halfwords, so two rows take 32.</li>
+  <li>The swatches follow the row being previewed.</li>
+  <li>The same texture drawn with row 1. Note the width: a 4bpp texture 32 texels wide is 8 halfwords wide in VRAM.</li>
+  <li>An imported TIM keeps its position and all its palette rows.</li>
+</ol>
+
+<h2 id="placement">9. Placement</h2>
+<img src="09-placement.png" alt="the placement section of the inspector">
+<ol class="notes">
+  <li>The texture's position in halfwords.</li>
+  <li>The CLUT's position. CLUT X must be a multiple of 16, so it moves in steps of 16.</li>
+  <li><b>Find free space</b> moves this asset to the first free spot that starts on a texture-page boundary, preferring one that does not cross the Y=256 line. A locked asset stays put.</li>
+  <li><b>Delete asset</b> removes it.</li>
+  <li>Dragging on the canvas does the same as typing coordinates, with snapping.</li>
+</ol>
+
+<h2 id="project">10. Project settings</h2>
+<img src="10-project.png" alt="the project settings">
+<ol class="notes">
+  <li><b>CLUT penalty</b>: how much auto-depth charges for CLUT VRAM compared with texture VRAM. At 1 it minimises total VRAM. Raising it pushes images near the boundary to 16bpp, which needs no CLUT.</li>
+  <li><b>Quality floor</b>, 0 to 100: auto-depth only picks a palettised depth where at least this percentage of texels stay within the 5-bit error. Without a floor it decides on VRAM cost alone.</li>
+  <li>Changing either setting re-runs auto-depth on every asset still set to auto. <b>Re-run auto depth on all</b> also puts back on auto the assets whose depth you chose by hand.</li>
+  <li><b>2MB VRAM</b> doubles the canvas to 1024 lines, for hardware with the second VRAM bank. The width does not change.</li>
+</ol>
+
+<h2 id="checks">11. Checks</h2>
+<p>TIM files will happily describe layouts the GPU cannot use. timweb checks for overlaps, placements inside keepouts or outside VRAM, CLUT X alignment, textures that cross the Y=256 texture-page boundary, and textures too wide for one page to address.</p>
+<img src="11-checks.png" alt="two layout issues in overlap view">
+<ol class="notes">
+  <li>The issue list, one line each.</li>
+  <li>Halfwords claimed by more than one placement.</li>
+  <li>The issue count.</li>
+  <li>The Overlap view paints the collisions on the canvas.</li>
+</ol>
+<img src="12-free-space.png" alt="the free space view">
+<ol class="notes">
+  <li>The Free space view shows what is still unclaimed.</li>
+  <li>The same, as a percentage.</li>
+</ol>
+
+<h2 id="export">12. Export</h2>
+<img src="13-export.png" alt="export controls">
+<ol class="notes">
+  <li><b>Save project</b> and <b>Open project</b> store the layout and settings as JSON. The images are not stored: re-import them and they attach to their entries by name.</li>
+  <li><b>Export .zip</b> writes every asset in each format ticked to its right.</li>
+  <li><code>.tim</code>: standard TIM files.</li>
+  <li><code>raw .dat</code>: headerless image data and palette data in separate files, as ps1-bare-metal's <code>convertImage.py</code> writes them.</li>
+  <li><code>.pxl/.clt</code>: split TIMs, the pixel section and the CLUT section in two files.</li>
+  <li><code>template</code>: a text file generated from the placement template (next section).</li>
+  <li>The file names the suffixes above it produce, shown for the first asset. Two suffixes that collide are refused.</li>
+</ol>
+
+<h2 id="template">13. Placement templates</h2>
+<p>Raw <code>.dat</code> files carry no coordinates, so the template writes them out in whatever form your build needs: a C table, a list of upload calls, JSON.</p>
+<img src="14-template.png" alt="the placement template and its preview">
+<ol class="notes">
+  <li>The name the generated file gets inside the zip.</li>
+  <li>The template. <code>{{#assets}}...{{/assets}}</code> repeats once per asset; the placeholders are listed under the box. Append <code>:hex</code> or <code>:hex4</code> to a number. An unknown placeholder is left as written, so a typo shows up in the output.</li>
+  <li><b>Preview</b> renders it now.</li>
+  <li>The rendered text, as it will be exported.</li>
+</ol>
+<p><code>x y w h</code> are halfwords and <code>width height</code> are texels. Mixing them up is the classic way to get a VRAM upload wrong.</p>
+</main>
+</body>
+</html>
