@@ -66,6 +66,18 @@ describe('transparency', () => {
     expect(r.indices[0]).not.toBe(0);
   });
 
+  it('does not grade texels the alpha threshold turned into holes', () => {
+    // One colour, one row faded to alpha 16: below the default hole threshold.
+    // The palette is exact, so nothing may read as past the floor.
+    const img = image(16, 16, (_x, y) => [232, 163, 60, y === 0 ? 16 : 255]);
+    const r = quantize(img, 16, 16, { maxColors: 16 });
+    expect(r.bands.transparent).toBe(16);
+    expect(r.indices[0]).toBe(r.transparentIndex);
+    expect(r.report.maxChannelError).toBeLessThanOrEqual(TRUNCATION_FLOOR);
+    expect(r.report.pastFloorFraction).toBe(0);
+    expect(r.report.pixelsCompared).toBe(240);
+  });
+
   it('does not let transparent pixels pull palette entries around', () => {
     // A field of pure red, holed with pure green at alpha 0. Green must not
     // appear in the palette: it is not visible, it is a hole.

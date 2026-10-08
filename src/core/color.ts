@@ -152,6 +152,11 @@ export function scoreAgainstSource(
    * `maxChannelError` and the mean so it cannot hide.
    */
   excused?: Uint8Array,
+  /**
+   * One byte per pixel, non-zero meaning "this pixel is a hole in the output".
+   * Skipped like a source pixel with alpha 0: a hole has no colour to compare.
+   */
+  holes?: Uint8Array,
 ): ErrorReport {
   if (source.length !== reconstructed.length) {
     throw new Error(
@@ -166,7 +171,7 @@ export function scoreAgainstSource(
   let excusedCount = 0;
 
   for (let i = 0, px = 0; i < source.length; i += 4, px++) {
-    if (source[i + 3] === 0) continue;
+    if (source[i + 3] === 0 || (holes && holes[px])) continue;
     compared++;
 
     let worst = 0;

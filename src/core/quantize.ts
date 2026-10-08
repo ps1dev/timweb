@@ -553,10 +553,20 @@ export function quantize(
     if (!any) excused = undefined;
   }
 
+  // Texels the alpha threshold made holes have no colour to get wrong. Grading
+  // them against the source RGB would charge a perfect palette for a decision
+  // the user made on the alpha slider, and auto-depth would chase that loss up
+  // to 16bpp, where it does not go away either.
+  const holes = new Uint8Array(pixelCount);
+  for (let i = 0; i < pixelCount; i++) {
+    if (band[i] === Band.Transparent) holes[i] = 1;
+  }
+
   const report = scoreAgainstSource(
     rgba,
     reconstruct(indices, palette555, transparentIndex, pixelCount),
     excused,
+    holes,
   );
 
   return {
